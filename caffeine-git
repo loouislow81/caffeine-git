@@ -1,0 +1,203 @@
+#!/usr/bin/env bash
+#
+# @@script: gitd.sh
+# @@description: A tool to help you with the offline caching with git repositories. Clone off-line and set a remote cache path for better collaboration locally.
+# @@version:
+# @@author: Loouis Low
+# @@copyright:
+#
+
+binary=$(basename $0)
+
+# typos
+blue='\e[94m'
+green='\e[92m'
+red='\e[91m'
+dgray='\e[90m'
+nc='\033[0m'
+bold=$(tput bold)
+normal=$(tput sgr0)
+tag='\e[100m'
+title="${blue}[$binary]${nc}"
+
+function runas_root() {
+  # check if sudo
+  if [ "$(whoami &2> /dev/null)" != "root" ] &&
+  [ "$(id -un &2> /dev/null)" != "root" ]
+  then
+    echo -e "$title ${bold}permission denied.${normal}"
+    exit 1
+  fi
+}
+
+function prerequisites () {
+  if ! [ -x "$(command -v git)" ];
+  then
+    echo -e "$title ${bold}installing git...${normal}" >&2
+    apt install -y git
+  fi
+}
+
+### init
+runas_root
+prerequisites
+
+# get cache directory
+CACHE=$(git config cache.directory)
+
+if [ ! -d "$CACHE" -a ! "$1" = "init" ]
+then
+  echo -e "$title ${red}[ERR]${normal} cache directory not found."
+  echo -e "$title use ${tag}${bold} $binary init <path> ${normal} to specify a custom directory."
+  echo -e "$title or use ${tag}${bold} $binary init ${normal} to create one by using default directory."
+  exit 1
+fi
+
+# trigger 'init' action
+if [ "$1" = "init" ]
+then
+
+  if [ -d "$CACHE" -a -f "$CACHE/HEAD" -a ! "$2" = "$CACHE" ]
+  then
+    echo -e "$title cache directory is initialised."
+    echo -e "$title use ${tag}${bold} $binary delete --force ${normal} to delete."
+    echo "$CACHE"
+    exit 1
+  fi
+
+  # create cache directory
+  CACHE="$2"
+  TYPE=global
+
+  [ "$CACHE" = "" -a -w /var/cache ] && CACHE=/var/cache/$binary && TYPE=system
+  [ "$CACHE" = "" ] && CACHE=~/.cache/$binary
+
+  mkdir -p "$CACHE"
+  cd "$CACHE"
+  echo -e "${dgray}---->> Git >>-------------------------------------------------------------------${normal}"
+  git init --bare
+  chgrp -R users .
+  chmod -R g+w .
+  git config --$TYPE cache.directory "$CACHE"
+  echo -e "${dgray}---->> Git >>-------------------------------------------------------------------${normal}"
+
+# trigger 'delete' action
+elif [ "$1" = "delete" ]
+then
+
+  if [ ! "$2" = "--force" ]
+  then
+    echo -e "$title type: gitd help"
+    echo -e "$title add ${tag}${bold} --force ${normal} option to delete cache directory"
+    exit 1
+  fi
+
+  if [ ! "$(git config --system cache.directory)" = "" ]
+  then
+    CACHE="$(git config --system cache.directory)"
+    git config --system --remove-section cache 2> /dev/null && \
+      rm -rf "$CACHE" && \
+      echo -e "$title type: gitd help"
+      echo -e "$title system cache directory $CACHE deleted."
+  fi
+
+  if [ ! "$(git config --global cache.directory)" = "" ]
+  then
+    CACHE="$(git config --global cache.directory)"
+    git config --global --remove-section cache 2> /dev/null && \
+      rm -rf "$CACHE" && \
+      echo -e "$title type: gitd help"
+      echo -e "$title global user cache directory $CACHE deleted."
+  fi
+
+# trigger 'add' action
+elif [ "$1" = "add" ]
+then
+
+  if [ "$2" = "" -o "$3" = "" ]
+  then
+    echo -e "$title type: gitd help"
+    echo -e "$title method: ${tag}${bold} $binary <remote_name> <remote_url> ${normal}"
+    echo -e "$title example: $binary myRepo https://github.com/myrepo/test.git"
+    exit 1
+  fi
+
+  # copy it in the main cache directory
+  echo -e "$title adding ${bold}$2${normal} to cache $CACHE"
+  cd "$CACHE"
+  echo -e "${dgray}---->> Git >>-------------------------------------------------------------------${normal}"
+  git remote add "$2" "$3"
+  git fetch "$2"
+  echo -e "${dgray}---->> Git >>-------------------------------------------------------------------${normal}"
+
+  # display use
+  echo -e "$title type: $binary help"
+  echo -e "$title ${green}[success]${normal} you can now use the cached repository with special URL."
+  echo
+  echo -e "${dgray}---->> Copy >>------------------------------------------------------------------${normal}"
+  echo -e "${bold}git clone --reference $CACHE $3 ${normal}"
+  echo -e "${dgray}---->> Copy >>------------------------------------------------------------------${normal}"
+  echo
+
+# trigger 'rm' action
+elif [ "$1" = "rm" ]
+then
+
+  if [ ! "$2" = "--force" -o "$3" = "" ]
+  then
+    echo -e "$title type: gitd help"
+    echo -e "$title method: $binary rm --force <remove_name>"
+    exit 1
+  fi
+
+  cd "$CACHE"
+  git remote rm "$3"
+
+# trigger 'fetch' action
+elif [ "$1" = "fetch" ]
+then
+
+  cd "$CACHE"
+  git fetch --all --prune
+
+# trigger 'show' action
+elif [ "$1" = "show" ]
+then
+
+  cd "$CACHE"
+  git remote -v \
+  | grep \(fetch\) \
+  | grep "$2" \
+  | awk "{print \"git clone --reference $CACHE \"\$2}"
+
+# trigger 'help' action
+elif [ "$1" = "help" ]
+then
+
+  echo
+  echo -e "${bold}Usage:${normal}"
+  echo
+  echo "  $binary help                      display this information"
+  echo "  $binary init <cache_path>               initialize the cache directory"
+  echo "  $binary add <repo_name>           add a cached Git repository"
+  echo "  $binary delete --force            delete the cache directory"
+  echo "  $binary rm --force <repo_name>    remove a cached Git repository"
+  echo "  $binary show <repo_name>          show all cached Git repositories"
+  echo "  $binary fetch                     update all cached Git repository"
+  echo
+  echo "  (Any other command will be applied to the cache directory.)"
+  echo "  e.g. \`$binary gc\` or \`$binary remote show\`.)"
+  echo
+  echo "Standard cache directory is either:"
+  echo
+  echo "  /var/cache/$binary   if created by root (then usable by every user)"
+  echo "  ~/.cache/$binary     else"
+  echo
+
+# default trigger to directly act on the cache directory
+else
+
+  cd "$CACHE"
+  git "$@"
+
+fi
