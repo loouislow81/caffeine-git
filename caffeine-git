@@ -9,7 +9,7 @@
 
 binary=$(basename $0)
 
-# typos
+# ansi
 blue='\e[94m'
 green='\e[92m'
 red='\e[91m'
@@ -118,7 +118,7 @@ then
   then
     echo -e "$title type: gitd help"
     echo -e "$title method: ${tag}${bold} $binary <remote_name> <remote_url> ${normal}"
-    echo -e "$title example: $binary myRepo https://github.com/myrepo/test.git"
+    echo -e "$title example: $binary add myRepo https://github.com/myrepo/test.git"
     exit 1
   fi
 
